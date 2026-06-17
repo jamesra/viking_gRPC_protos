@@ -1,16 +1,23 @@
 syntax = "proto3";
 
+option csharp_namespace = "Viking.gRPC.SegmentationServiceTypes.V1";
+
 package segmentation;
 
 // Service for segmenting images using SAM2
 service SegmentationService {
-  // Segment an image based on input coordinates
+  // Upload an image to the server cache and receive a unique ID
+  rpc UploadImage (UploadImageRequest) returns (UploadImageResponse) {}
+  // Segment an image based on input coordinates (uses cached image_id or inline image_data)
   rpc SegmentImage (SegmentationRequest) returns (SegmentationResponse) {}
+  // Segment an image using a dictionary mapping IDs to points (id=0 for background, id!=0 for foreground)
+  rpc MultiSegmentImage (MultiSegmentationRequest) returns (SegmentationResponse) {}
+  // Delete a cached image from the server
+  rpc DeleteImage (DeleteImageRequest) returns (DeleteImageResponse) {}
 }
 
-// Request message containing the image and coordinates
-message SegmentationRequest {
-  // Grayscale image data as bytes
+// Request to upload an image to the server cache
+message UploadImageRequest {
   bytes image_data = 1;
 
   // Image width
@@ -18,14 +25,46 @@ message SegmentationRequest {
 
   // Image height
   int32 height = 3;
+}
 
-  // List of coordinates to use as prompts for segmentation
-  repeated Point coordinates = 4;
+// Response containing the cached image ID
+message UploadImageResponse {
+  uint64 image_id = 1;
+}
 
-  // Labels for each coordinate (1 for foreground, 0 for background)
-  repeated int32 labels = 5;
+// Request to delete a cached image
+message DeleteImageRequest {
+  uint64 image_id = 1;
+}
 
-  // Optional: Whether to output multiple masks per point
+// Response after deleting a cached image
+message DeleteImageResponse {
+  bool success = 1;
+}
+
+// Request message containing the image and coordinates for single-point segmentation
+message SegmentationRequest {
+  // Optional: ID of a previously uploaded image (use 0 or omit to send inline image_data)
+  uint64 image_id = 1;
+  // Grayscale image data as bytes (used when image_id is 0 or for backward compatibility)
+  bytes image_data = 2;
+  int32 width = 3;
+  int32 height = 4;
+  repeated Point coordinates = 5;
+  repeated int32 labels = 6;
+  bool multimask_output = 7;
+}
+
+// Request message for segmenting with multiple labeled points (id=0 for background, id!=0 for foreground)
+message MultiSegmentationRequest {
+  // Optional: ID of a previously uploaded image (use 0 or omit to send inline image_data)
+  uint64 image_id = 1;
+  // Grayscale image data as bytes (used when image_id is 0 or for backward compatibility)
+  bytes image_data = 2;
+  int32 width = 3;
+  int32 height = 4;
+  // Map of label ID to foreground point (id=0 = background, id!=0 = foreground object)
+  map<int32, Point> foreground_points = 5;
   bool multimask_output = 6;
 }
 
@@ -65,7 +104,11 @@ message SegmentResult {
 
   // Binary mask for this segment (optional, may be omitted to save bandwidth)
   bytes mask = 3;
+  // Top-left X of the mask in image coordinates
+  int32 x = 4;
+  // Top-left Y of the mask in image coordinates
+  int32 y = 5;
 
   // List of polygons representing the contours of this segment
-  repeated Polygon polygons = 4;
+  repeated Polygon polygons = 6;
 }
