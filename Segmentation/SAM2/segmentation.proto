@@ -14,6 +14,8 @@ service SegmentationService {
   rpc MultiSegmentImage (MultiSegmentationRequest) returns (SegmentationResponse) {}
   // Delete a cached image from the server
   rpc DeleteImage (DeleteImageRequest) returns (DeleteImageResponse) {}
+  // Return version, uptime, and a short status message for health/selection UI
+  rpc GetServerStatus (ServerStatusRequest) returns (ServerStatusResponse) {}
 }
 
 // Request to upload an image to the server cache
@@ -40,6 +42,21 @@ message DeleteImageRequest {
 // Response after deleting a cached image
 message DeleteImageResponse {
   bool success = 1;
+}
+
+message ServerStatusRequest {}
+
+message ServerStatusResponse {
+  string version = 1;
+  double uptime_seconds = 2;
+  string message = 3;
+  // Concurrent Upload/Segment/MultiSegment RPCs currently in flight
+  uint32 in_flight_requests = 4;
+  uint32 cached_images = 5;
+  uint64 cache_memory_bytes = 6;
+  // Exponential moving average of Upload/Segment/MultiSegment duration
+  double recent_latency_ms = 7;
+  uint32 inference_workers = 8;
 }
 
 // Request message containing the image and coordinates for single-point segmentation
