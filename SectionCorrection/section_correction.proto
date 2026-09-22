@@ -1,0 +1,174 @@
+syntax = "proto3";
+
+option csharp_namespace = "Viking.SectionCorrectionServiceTypes.gRPC.V1.Protos";
+
+package Viking.SectionCorrectionServiceTypes.gRPC.V1;
+
+import "google/protobuf/timestamp.proto";
+
+// Multi-volume morphology residual vector fields after mosaic+Stos volume mapping.
+// Catalogs files written under {root}/{volume_name}/{stos_group}/ by SectionCorrectionBuilder
+// and the GrpcSectionCorrectionService rebuild loop.
+// XY is volume nanometers (annotation DB units * AnnotateMetaData.Scale).
+// Unknown volume_name or stos_group: NOT_FOUND. GetSectionCorrection for a Z with no map: NOT_FOUND.
+service AnnotateSectionCorrections {
+  // Identity volumes this host rebuilds, plus any volume folders already on disk.
+  rpc ListVolumes (ListVolumesRequest) returns (ListVolumesResponse);
+
+  // Last rebuild pass: in-progress flag, timestamps, last error, volume names attempted.
+  rpc GetRebuildStatus (GetRebuildStatusRequest) returns (RebuildStatus);
+
+  // Published StosGroup correction sets. Empty volume_name lists every volume.
+  rpc ListCorrectionSets (ListCorrectionSetsRequest) returns (ListCorrectionSetsResponse);
+
+  // Z values that have a published map for this volume + StosGroup. Unknown pair: NOT_FOUND.
+  rpc ListCorrectedSections (ListCorrectedSectionsRequest) returns (ListCorrectedSectionsResponse);
+
+  // Builder provenance and the list of Z. Unknown pair: NOT_FOUND.
+  rpc GetCorrectionManifest (GetCorrectionManifestRequest) returns (CorrectionManifest);
+
+  // Sparse lattice for one section. Use to interpolate locally.
+  // Unknown pair or Z with no map: NOT_FOUND ("no correction for section {z} in '{volume}' '{name}'").
+  rpc GetSectionCorrection (GetSectionCorrectionRequest) returns (SectionCorrection);
+
+  // Sample the field for XY grouped by section. Every point on a found section interpolates.
+  // CorrectedXY.trusted is near-measurement support, not interpolation success.
+  // Unknown pair: NOT_FOUND. Empty sections, a section with no points, or duplicate z: INVALID_ARGUMENT.
+  rpc CorrectPoints (CorrectPointsRequest) returns (CorrectPointsResponse);
+}
+
+message ListVolumesRequest {}
+
+message ListVolumesResponse {
+  repeated VolumeInfo volumes = 1;
+}
+
+message VolumeInfo {
+  string volume_name = 1;
+  string vikingxml_endpoint = 2;
+  string annotation_endpoint = 3;
+}
+
+message GetRebuildStatusRequest {}
+
+message RebuildStatus {
+  bool in_progress = 1;
+  google.protobuf.Timestamp last_started_utc = 2;
+  google.protobuf.Timestamp last_completed_utc = 3;
+  string last_error = 4;
+  repeated string last_volumes = 5;
+}
+
+message ListCorrectionSetsRequest {
+  string volume_name = 1;
+}
+
+message ListCorrectionSetsResponse {
+  repeated CorrectionSetInfo sets = 1;
+}
+
+message CorrectionSetInfo {
+  string volume_name = 1;
+  string stos_group = 2;
+  CorrectionProvenance provenance = 3;
+}
+
+message ListCorrectedSectionsRequest {
+  string volume_name = 1;
+  string stos_group = 2;
+}
+
+message ListCorrectedSectionsResponse {
+  string volume_name = 1;
+  string stos_group = 2;
+  repeated int64 z = 3;
+}
+
+message GetCorrectionManifestRequest {
+  string volume_name = 1;
+  string stos_group = 2;
+}
+
+message CorrectionProvenance {
+  google.protobuf.Timestamp built_utc = 1;
+  google.protobuf.Timestamp annotation_watermark = 2;
+  double pitch_nm = 3;
+  double kernel_radius_nm = 4;
+  int32 min_annotation_votes = 5;
+  ResidualWindow residual_window = 6;
+}
+
+message ResidualWindow {
+  int32 min_both = 1;
+  int32 max_both = 2;
+  int32 min_one = 3;
+  int32 max_one = 4;
+}
+
+message CorrectionManifest {
+  string volume_name = 1;
+  string stos_group = 2;
+  CorrectionProvenance provenance = 3;
+  string volume_url = 4;
+  repeated int64 z = 5;
+}
+
+message GetSectionCorrectionRequest {
+  string volume_name = 1;
+  string stos_group = 2;
+  int64 z = 3;
+}
+
+message SectionCorrection {
+  string volume_name = 1;
+  string stos_group = 2;
+  int64 z = 3;
+  double origin_x_nm = 4;
+  double origin_y_nm = 5;
+  double pitch_nm = 6;
+  repeated LatticeVector nodes = 7;
+}
+
+message LatticeVector {
+  int32 gx = 1;
+  int32 gy = 2;
+  double dx = 3;
+  double dy = 4;
+  int32 vote_count = 5;
+}
+
+message VolumeXY {
+  double x = 1;
+  double y = 2;
+}
+
+message SectionPoints {
+  int64 z = 1;
+  repeated VolumeXY points = 2;
+}
+
+message CorrectPointsRequest {
+  string volume_name = 1;
+  string stos_group = 2;
+  repeated SectionPoints sections = 3;
+}
+
+message CorrectedXY {
+  double x = 1;
+  double y = 2;
+  double dx = 3;
+  double dy = 4;
+  bool trusted = 5;
+}
+
+message CorrectedSection {
+  int64 z = 1;
+  bool found_section = 2;
+  repeated CorrectedXY points = 3;
+}
+
+message CorrectPointsResponse {
+  string volume_name = 1;
+  string stos_group = 2;
+  repeated CorrectedSection sections = 3;
+}
