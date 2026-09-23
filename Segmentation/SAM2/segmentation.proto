@@ -8,8 +8,18 @@ package segmentation;
 service SegmentationService {
   // Upload an image to the server cache and receive a unique ID
   rpc UploadImage (UploadImageRequest) returns (UploadImageResponse) {}
+  // Upload one 1024x1024 grid cell. A repeat of the same TileCoord with identical bytes
+  // refreshes the cache entry and does not re-encode.
+  rpc UploadTile (UploadTileRequest) returns (UploadTileResponse) {}
+  // Segment using uploaded grid cells. Polygons are in the fused mosaic. requested_tiles
+  // is non-empty when the mask hit a border the server does not have a cell for.
+  rpc SegmentTiles (SegmentTilesRequest) returns (SegmentationResponse) {}
   // Segment an image based on input coordinates (uses cached image_id or inline image_data)
   rpc SegmentImage (SegmentationRequest) returns (SegmentationResponse) {}
+  // Auto-segmentation: each request message is one independent point set for image_id.
+  // The server writes one SegmentationResponse per set as soon as that predict() finishes.
+  // The first message must carry image_id. Later messages reuse it when image_id is 0.
+  rpc SegmentImageSets (stream SegmentImageSetRequest) returns (stream SegmentationResponse) {}
   // Segment an image using a dictionary mapping IDs to points (id=0 for background, id!=0 for foreground)
   rpc MultiSegmentImage (MultiSegmentationRequest) returns (SegmentationResponse) {}
   // Delete a cached image from the server
@@ -32,6 +42,39 @@ message UploadImageRequest {
 // Response containing the cached image ID
 message UploadImageResponse {
   uint64 image_id = 1;
+}
+
+// Stable identity of one 1024x1024 cell at a pyramid downsample.
+// Row and column are floor(world / (1024 * downsample)); row increases with world Y.
+message TileCoord {
+  string volume = 1;
+  int32 section = 2;
+  string channel = 3;
+  string transform = 4;
+  int32 downsample = 5;
+  int32 row = 6;
+  int32 col = 7;
+}
+
+message UploadTileRequest {
+  TileCoord coord = 1;
+  bytes image_data = 2;
+  int32 width = 3;
+  int32 height = 4;
+}
+
+message UploadTileResponse {
+  // True when this coord was already encoded and the bytes were unchanged.
+  bool already_cached = 1;
+}
+
+// Points are mosaic pixels at the tiles' downsample: X right, Y up (world / downsample).
+message SegmentTilesRequest {
+  repeated TileCoord tiles = 1;
+  repeated Point foreground = 2;
+  repeated Point background = 3;
+  bool multimask_output = 4;
+  bool omit_labeled_image = 5;
 }
 
 // Request to delete a cached image
@@ -61,9 +104,10 @@ message ServerStatusResponse {
 
 // Request message containing the image and coordinates for single-point segmentation
 message SegmentationRequest {
-  // Optional: ID of a previously uploaded image (use 0 or omit to send inline image_data)
+  // Fast path: ID from UploadImage. Non-zero skips set_image() and runs predict() only.
+  // Use 0 or omit to send inline image_data (re-encodes on every request).
   uint64 image_id = 1;
-  // Grayscale image data as bytes (used when image_id is 0 or for backward compatibility)
+  // Image bytes used only when image_id is 0. Ignored when image_id is non-zero.
   bytes image_data = 2;
   int32 width = 3;
   int32 height = 4;
@@ -74,11 +118,22 @@ message SegmentationRequest {
   bool omit_labeled_image = 8;
 }
 
+// One independent auto-segmentation prompt set for a cached image.
+message SegmentImageSetRequest {
+  // Cached image from UploadImage. Required on the first message of the stream.
+  // Zero on a later message reuses the image_id from the first message.
+  uint64 image_id = 1;
+  repeated Point foreground = 2;
+  repeated Point background = 3;
+  bool multimask_output = 4;
+}
+
 // Request message for segmenting with multiple labeled points (id=0 for background, id!=0 for foreground)
 message MultiSegmentationRequest {
-  // Optional: ID of a previously uploaded image (use 0 or omit to send inline image_data)
+  // Fast path: ID from UploadImage. Non-zero skips set_image() and runs predict() only.
+  // Use 0 or omit to send inline image_data (re-encodes on every request).
   uint64 image_id = 1;
-  // Grayscale image data as bytes (used when image_id is 0 or for backward compatibility)
+  // Image bytes used only when image_id is 0. Ignored when image_id is non-zero.
   bytes image_data = 2;
   int32 width = 3;
   int32 height = 4;
@@ -113,6 +168,14 @@ message SegmentationResponse {
 
   // List of segment results
   repeated SegmentResult segments = 4;
+
+  // Bottom-left of the fused mosaic in downsample pixels (Y increases upward).
+  // SegmentImage leaves these at 0; the mosaic is the uploaded viewport.
+  int32 origin_x = 5;
+  int32 origin_y = 6;
+
+  // Cells the client should upload so growth can continue. Empty when the mask is finished.
+  repeated TileCoord requested_tiles = 7;
 }
 
 // Information about a single segment
