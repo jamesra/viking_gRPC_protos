@@ -45,6 +45,7 @@ message UploadImageResponse {
 }
 
 // Stable identity of one 1024x1024 cell at a pyramid downsample.
+// This is the reusable cross-client cache key (not a sequential image_id).
 // Row and column are floor(world / (1024 * downsample)); row increases with world Y.
 message TileCoord {
   string volume = 1;
@@ -64,7 +65,8 @@ message UploadTileRequest {
 }
 
 message UploadTileResponse {
-  // True when this coord was already encoded and the bytes were unchanged.
+  // True when this TileCoord was already encoded and the bytes were unchanged.
+  // Clients address tiles by Coord on SegmentTiles; no image_id is returned.
   bool already_cached = 1;
 }
 
