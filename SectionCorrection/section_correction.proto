@@ -35,6 +35,19 @@ service AnnotateSectionCorrections {
   // CorrectedXY.trusted is near-measurement support, not interpolation success.
   // Unknown pair: NOT_FOUND. Empty sections, a section with no points, or duplicate z: INVALID_ARGUMENT.
   rpc CorrectPoints (CorrectPointsRequest) returns (CorrectPointsResponse);
+
+  // Load structure locations (and child structures when requested), then apply correction.
+  // Neighbor samples the published residual field. CurveFit is leave-one-out Catmull-Rom
+  // on the process graph. Omitted correction is All (Neighbor then CurveFit).
+  rpc CorrectStructures (CorrectStructuresRequest) returns (CorrectStructuresResponse);
+}
+
+// Same flag values as AnnotationVizLib.CorrectionMode. Unset on the request means All.
+enum CorrectionMode {
+  CORRECTION_MODE_NONE = 0;
+  CORRECTION_MODE_NEIGHBOR = 1;
+  CORRECTION_MODE_CURVE_FIT = 2;
+  CORRECTION_MODE_ALL = 3;
 }
 
 message ListVolumesRequest {}
@@ -57,6 +70,10 @@ message RebuildStatus {
   google.protobuf.Timestamp last_completed_utc = 3;
   string last_error = 4;
   repeated string last_volumes = 5;
+  // Host assembly version. Changes on algorithm / CorrectStructures deploys even when
+  // published field built_utc is unchanged. Use with CorrectionProvenance.built_utc to
+  // invalidate CorrectStructures client caches.
+  string service_version = 6;
 }
 
 message ListCorrectionSetsRequest {
@@ -151,6 +168,33 @@ message CorrectPointsRequest {
   string volume_name = 1;
   string stos_group = 2;
   repeated SectionPoints sections = 3;
+  optional CorrectionMode correction = 4;
+}
+
+message CorrectStructuresRequest {
+  string volume_name = 1;
+  string stos_group = 2;
+  repeated int64 structure_ids = 3;
+  bool include_children = 4;
+  optional CorrectionMode correction = 5;
+}
+
+message CorrectedLocation {
+  int64 location_id = 1;
+  int64 structure_id = 2;
+  int64 z = 3;
+  double x = 4;
+  double y = 5;
+  double dx = 6;
+  double dy = 7;
+}
+
+message CorrectStructuresResponse {
+  string volume_name = 1;
+  string stos_group = 2;
+  repeated CorrectedLocation locations = 3;
+  // Same as RebuildStatus.service_version — echo for CorrectStructures cache keys.
+  string service_version = 4;
 }
 
 message CorrectedXY {
