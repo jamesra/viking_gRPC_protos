@@ -89,6 +89,39 @@ message DeleteImageResponse {
   bool success = 1;
 }
 
+// What a model wants its input to be. The client picks the RPCs and decides what a camera move
+// invalidates from this, instead of hard-coding one model.
+enum SubmissionMode {
+  // Never sent. proto3 requires a zero value; a client rejects it.
+  SUBMISSION_MODE_UNSPECIFIED = 0;
+  // Fixed 1024x1024 cells on a grid anchored at the volume origin, sent with UploadTile and
+  // SegmentTiles. Cells are rendered without overlays and keyed by TileCoord, so they are shared
+  // across clients and a result does not depend on where the camera is.
+  SUBMISSION_MODE_FIXED_TILE_GRID = 1;
+  // The whole screen as the user sees it, sent with UploadImage and SegmentImage. The image depends
+  // on the viewport rectangle and zoom, so any view move makes an earlier result stale.
+  SUBMISSION_MODE_FULL_VIEWPORT = 2;
+}
+
+// Whether the pyramid downsample sent with FIXED_TILE_GRID can change as the user zooms.
+// Not consulted for FULL_VIEWPORT, whose scale is always the camera's.
+enum ResolutionMode {
+  // Never sent. proto3 requires a zero value; a client rejects it.
+  RESOLUTION_MODE_UNSPECIFIED = 0;
+  // One downsample (1). Every tile key is the same at every zoom.
+  RESOLUTION_MODE_SINGLE = 1;
+  // The client may submit a coarser downsample when zoomed out. Crossing a level changes every
+  // tile key, so work submitted at the old level is stale.
+  RESOLUTION_MODE_MULTI = 2;
+}
+
+// How one model wants to be fed. Today the server reports the single loaded model; a list of
+// named models is expected to reuse this message.
+message ModelCapabilities {
+  SubmissionMode submission_mode = 1;
+  ResolutionMode resolution_mode = 2;
+}
+
 message ServerStatusRequest {}
 
 message ServerStatusResponse {
@@ -102,6 +135,8 @@ message ServerStatusResponse {
   // Exponential moving average of Upload/Segment/MultiSegment duration
   double recent_latency_ms = 7;
   uint32 inference_workers = 8;
+  // How the loaded model wants its input submitted. Always set.
+  ModelCapabilities capabilities = 9;
 }
 
 // Request message containing the image and coordinates for single-point segmentation
