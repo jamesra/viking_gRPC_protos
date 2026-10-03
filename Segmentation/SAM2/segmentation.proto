@@ -11,9 +11,12 @@ service SegmentationService {
   // Upload one 1024x1024 grid cell. A repeat of the same TileCoord with identical bytes
   // refreshes the cache entry and does not re-encode.
   rpc UploadTile (UploadTileRequest) returns (UploadTileResponse) {}
-  // Segment using uploaded grid cells. Polygons are in the fused mosaic. requested_tiles
-  // is non-empty when the mask hit a border the server does not have a cell for.
-  rpc SegmentTiles (SegmentTilesRequest) returns (SegmentationResponse) {}
+  // Segment using uploaded grid cells. The server owns the request: it grows the mask over the
+  // cells it has, then streams TilesNeeded for the cells the mask reached that it does not have,
+  // waits for the client's TilesAnswer, and continues the same growth with them. When nothing more
+  // is needed it streams the finished SegmentationResponse and ends the call.
+  // The client sends exactly one `start`, then one `answer` per TilesNeeded.
+  rpc SegmentTilesStream (stream SegmentTilesStreamRequest) returns (stream SegmentTilesStreamResponse) {}
   // Segment an image based on input coordinates (uses cached image_id or inline image_data)
   rpc SegmentImage (SegmentationRequest) returns (SegmentationResponse) {}
   // Auto-segmentation: each request message is one independent point set for image_id.
@@ -66,7 +69,7 @@ message UploadTileRequest {
 
 message UploadTileResponse {
   // True when this TileCoord was already encoded and the bytes were unchanged.
-  // Clients address tiles by Coord on SegmentTiles; no image_id is returned.
+  // Clients address tiles by Coord on SegmentTilesStream; no image_id is returned.
   bool already_cached = 1;
 }
 
@@ -77,6 +80,53 @@ message SegmentTilesRequest {
   repeated Point background = 3;
   bool multimask_output = 4;
   bool omit_labeled_image = 5;
+  // Logit above which a pixel is object. Higher values shrink the mask; lower values grow it.
+  // Optional so the server can tell an omitted field (it then uses its own default, 1.0) from an explicit 0.
+  optional float mask_threshold = 6;
+  // When true, each cell prediction is run twice: the second pass is given the first
+  // pass's low-resolution logits as SAM2's mask_input along with the same prompts.
+  bool use_mask_input = 7;
+  // SAM2 box prompts in mosaic pixels (same frame as the points). When present the server uses exactly
+  // these boxes and sends exactly the foreground points given, instead of looking for nine-click
+  // circles to box. A window uses the box with the most area inside it; SAM2 takes one box per call.
+  repeated BoundingBox foreground_boxes = 8;
+  // Client-issued ticket, echoed in SegmentationResponse.request_id and written to the server log and
+  // debug dump so one client log line can be matched to one server result. The server does not order
+  // or cancel by it: only the client knows which of its requests is still wanted. 0 means not set.
+  uint64 request_id = 9;
+}
+
+// Client to server on SegmentTilesStream.
+message SegmentTilesStreamRequest {
+  oneof body {
+    // Must be the first message and the only one of its kind.
+    SegmentTilesRequest start = 1;
+    // Reply to the latest TilesNeeded.
+    TilesAnswer answer = 2;
+  }
+}
+
+// What the client did about a TilesNeeded. Every requested tile must appear in exactly one list,
+// across one or more answers; the server waits until each has been answered.
+message TilesAnswer {
+  // Tiles that were uploaded with UploadTile and are now cached.
+  repeated TileCoord ready = 1;
+  // Tiles the client could not supply (capture failed, off the volume). Growth does not enter them.
+  repeated TileCoord unavailable = 2;
+}
+
+// Server to client on SegmentTilesStream.
+message SegmentTilesStreamResponse {
+  oneof update {
+    // Upload these, then send a TilesAnswer. The server waits for it.
+    TilesNeeded needed = 1;
+    // The finished mask. The server ends the call after sending it.
+    SegmentationResponse result = 2;
+  }
+}
+
+message TilesNeeded {
+  repeated TileCoord tiles = 1;
 }
 
 // Request to delete a cached image
@@ -187,6 +237,14 @@ message Point {
   int32 y = 2;
 }
 
+// Axis-aligned rectangle, inclusive corners, in the same pixel frame as Point (X right, Y up).
+message BoundingBox {
+  int32 x_min = 1;
+  int32 y_min = 2;
+  int32 x_max = 3;
+  int32 y_max = 4;
+}
+
 // Polygon representation as a list of points
 message Polygon {
   repeated Point points = 1;
@@ -211,8 +269,12 @@ message SegmentationResponse {
   int32 origin_x = 5;
   int32 origin_y = 6;
 
-  // Cells the client should upload so growth can continue. Empty when the mask is finished.
-  repeated TileCoord requested_tiles = 7;
+  // Was requested_tiles; growth now asks for cells with TilesNeeded on SegmentTilesStream.
+  reserved 7;
+  reserved "requested_tiles";
+
+  // SegmentTilesRequest.request_id echoed back. 0 when the request carried none.
+  uint64 request_id = 8;
 }
 
 // Information about a single segment
