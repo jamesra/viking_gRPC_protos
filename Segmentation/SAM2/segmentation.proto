@@ -16,6 +16,14 @@ service SegmentationService {
   // waits for the client's TilesAnswer, and continues the same growth with them. When nothing more
   // is needed it streams the finished SegmentationResponse and ends the call.
   // The client sends exactly one `start`, then one `answer` per TilesNeeded.
+  //
+  // Ending: after `result` the call ends OK. A client that cancels gets no result (the call is gone).
+  // A client that leaves TilesNeeded unanswered for the server's idle limit (default 60 s) gets
+  // DEADLINE_EXCEEDED. Other statuses: INVALID_ARGUMENT for a malformed conversation or request,
+  // NOT_FOUND ("TILE_NOT_FOUND row=.. col=..") when a tile holding a foreground point is not cached,
+  // FAILED_PRECONDITION ("NO_MATCHING_MASK ...") when the starting cell yields no mask that fits the
+  // prompt, RESOURCE_EXHAUSTED when the request is over the server's size limits, UNAVAILABLE when the
+  // GPU is lost. This RPC replaced the unary SegmentTiles, which no longer exists.
   rpc SegmentTilesStream (stream SegmentTilesStreamRequest) returns (stream SegmentTilesStreamResponse) {}
   // Segment an image based on input coordinates (uses cached image_id or inline image_data)
   rpc SegmentImage (SegmentationRequest) returns (SegmentationResponse) {}
@@ -74,6 +82,8 @@ message UploadTileResponse {
 }
 
 // Points are mosaic pixels at the tiles' downsample: X right, Y up (world / downsample).
+// The server refuses a request over its limits with RESOURCE_EXHAUSTED, naming the limit: by default
+// 64 tiles, 512 foreground plus background points, and 16 boxes (see the server README).
 message SegmentTilesRequest {
   repeated TileCoord tiles = 1;
   repeated Point foreground = 2;
@@ -187,6 +197,12 @@ message ServerStatusResponse {
   uint32 inference_workers = 8;
   // How the loaded model wants its input submitted. Always set.
   ModelCapabilities capabilities = 9;
+  // Which image encoder new embeddings are made with right now: "eager" or "compiled".
+  // Starts "eager" and becomes "compiled" once the background torch.compile encoder has passed its
+  // numeric check against the eager one and been swapped in. Empty when the model does not report it.
+  string encoder_generation = 10;
+  // State of the background encoder compile: "off", "warming", "ready" or "failed".
+  string compile_status = 11;
 }
 
 // Request message containing the image and coordinates for single-point segmentation
@@ -245,9 +261,19 @@ message BoundingBox {
   int32 y_max = 4;
 }
 
-// Polygon representation as a list of points
+// Polygon representation as a list of points: the outer boundary of one connected piece of a mask.
+// Coordinates are integer pixel indices in the mask's own frame (X right, Y down from the top), the
+// OpenCV contour convention: point (x, y) is the centre of the pixel in column x, row y, so the traced
+// ring runs through pixel centres, half a pixel inside the true pixel edge. A client that places the
+// mask by pixel edges (as Viking does with the mask PNG) should add 0.5 to a polygon point to compare
+// the two.
 message Polygon {
   repeated Point points = 1;
+  // Interior rings (holes) of this piece, each a closed ring in the same pixel frame as `points`.
+  // Empty for a solid piece. Added after the first release, so an older client simply never reads it.
+  // A hole is only listed when it is larger than the server's small-hole threshold (3% of the mask
+  // area); smaller holes are filled in the mask before it is traced.
+  repeated Polygon holes = 2;
 }
 
 // Response message containing the segmentation results
