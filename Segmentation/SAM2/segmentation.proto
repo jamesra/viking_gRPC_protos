@@ -146,20 +146,25 @@ message SegmentTilesRequest {
 message Feature {
   // Normal SAM2 use: foreground clicks in a foreground Feature, background clicks in a background one.
   repeated Point points = 1;
-  // A likelihood hint, not a claim about every pixel: "most likely inside". SAM2 gets it as a box
-  // for a foreground Feature. SAM2 has no background box, so the server passes a background rectangle
-  // as a weak negative mask_input.
-  optional BoundingBox rectangle = 2;
-  // A per-pixel claim that the mask should grow beyond. SAM2 gets it as mask_input.
+  // Likelihood hints, not claims about every pixel: "most likely inside". SAM2 gets one as a box for
+  // a foreground Feature (the largest that reaches a window; SAM2 takes one box per call). SAM2 has
+  // no background box, so the server passes each background rectangle as a weak negative mask_input.
+  // Ignored in a foreground Feature that has a mask.
+  repeated BoundingBox rectangles = 2;
+  // A per-pixel claim that the mask should grow beyond. SAM2 gets it as mask_input. There is only one:
+  // a client with several shapes sums (unions) them into one Mask. A foreground Feature takes a filled
+  // rectangle only (png empty); a background Feature may send a shaped mask.
   optional Mask mask = 3;
 }
 
-// A mask prompt. Only bounds is supported today: a filled axis-aligned rectangle.
+// A mask prompt: a filled axis-aligned rectangle, or a shape inside one.
 message Mask {
-  // The filled rectangle. When png is empty every pixel inside it is the mask.
+  // The rectangle, inclusive corners. When png is empty every pixel inside it is the mask.
   BoundingBox bounds = 1;
-  // Reserved for an arbitrary-shaped mask (PNG over bounds). The server rejects a Mask with png set
-  // until it is implemented.
+  // Optional shape: a PNG exactly (x_max - x_min + 1) wide and (y_max - y_min + 1) high, in mosaic
+  // pixels at the tiles' downsample, where a non-zero pixel is in the mask. Image row 0 is y_max (images
+  // are Y down; mosaic coordinates are Y up). Only a background Feature may send it. The server rejects
+  // bounds larger than 2^26 pixels.
   bytes png = 2;
 }
 
