@@ -129,6 +129,38 @@ message SegmentTilesRequest {
   // ResponseContent flags OR-ed together. 0 keeps the previous answer (MASKS | POLYGONS, upscaled).
   // Only SegmentTilesStream honours it: it is the one path that fuses logits across cells.
   uint32 response_content = 10;
+  // What the object is, as one Feature, in addition to the legacy foreground, foreground_boxes fields
+  // (the server merges them; new clients should use only the Feature). A foreground Feature's rectangle
+  // says the objects are most likely inside it and its mask says everything inside is object and the
+  // mask should grow beyond it.
+  optional Feature foreground_feature = 11;
+  // What the object is not, as one Feature, in addition to the legacy background field. A background
+  // Feature's points are SAM2 background clicks, its rectangle says the background is most likely
+  // inside it, and its mask says everything inside is background and the mask should grow beyond it.
+  optional Feature background_feature = 12;
+}
+
+// One thing the user knows about the image: any mix of points, a rectangle and a mask. Used as the
+// foreground and as the background of SegmentTilesRequest, where the meaning of each part is given.
+// All coordinates are mosaic pixels at the tiles' downsample, X right, Y up, like Point.
+message Feature {
+  // Normal SAM2 use: foreground clicks in a foreground Feature, background clicks in a background one.
+  repeated Point points = 1;
+  // A likelihood hint, not a claim about every pixel: "most likely inside". SAM2 gets it as a box
+  // for a foreground Feature. SAM2 has no background box, so the server passes a background rectangle
+  // as a weak negative mask_input.
+  optional BoundingBox rectangle = 2;
+  // A per-pixel claim that the mask should grow beyond. SAM2 gets it as mask_input.
+  optional Mask mask = 3;
+}
+
+// A mask prompt. Only bounds is supported today: a filled axis-aligned rectangle.
+message Mask {
+  // The filled rectangle. When png is empty every pixel inside it is the mask.
+  BoundingBox bounds = 1;
+  // Reserved for an arbitrary-shaped mask (PNG over bounds). The server rejects a Mask with png set
+  // until it is implemented.
+  bytes png = 2;
 }
 
 // Client to server on SegmentTilesStream.
