@@ -153,7 +153,7 @@ message Feature {
   repeated BoundingBox rectangles = 2;
   // A per-pixel claim that the mask should grow beyond. SAM2 gets it as mask_input. There is only one:
   // a client with several shapes sums (unions) them into one Mask. A foreground mask and a background
-  // mask are the same message; a circle's inscribed square is just a mask whose bitmap is a square.
+  // mask are the same message; a circle seed is a mask whose bitmap is the disc.
   optional Mask mask = 3;
 }
 
