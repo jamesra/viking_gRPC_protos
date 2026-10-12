@@ -152,19 +152,19 @@ message Feature {
   // Ignored in a foreground Feature that has a mask.
   repeated BoundingBox rectangles = 2;
   // A per-pixel claim that the mask should grow beyond. SAM2 gets it as mask_input. There is only one:
-  // a client with several shapes sums (unions) them into one Mask. A foreground Feature takes a filled
-  // rectangle only (png empty); a background mask may carry a PNG bitmap (Mask.png).
+  // a client with several shapes sums (unions) them into one Mask. A foreground mask and a background
+  // mask are the same message; a circle's inscribed square is just a mask whose bitmap is a square.
   optional Mask mask = 3;
 }
 
-// A mask prompt: a filled axis-aligned rectangle, or a shape inside one.
+// A mask prompt: a bitmap of any shape inside a rectangle of bounds.
 message Mask {
   // The rectangle, inclusive corners. When png is empty every pixel inside it is the mask.
   BoundingBox bounds = 1;
   // Optional bitmap: a PNG exactly (x_max - x_min + 1) wide and (y_max - y_min + 1) high, in mosaic
   // pixels at the tiles' downsample, where a non-zero pixel is in the mask. Image row 0 is y_max (images
-  // are Y down; mosaic coordinates are Y up). Only a background Feature may send it. The server rejects
-  // bounds larger than 2^26 pixels.
+  // are Y down; mosaic coordinates are Y up). At most 1024 x 1024,
+  // SAM2's input size; clients should send it 1-bit greyscale, which is a few hundred bytes for a few shapes.
   bytes png = 2;
 }
 
