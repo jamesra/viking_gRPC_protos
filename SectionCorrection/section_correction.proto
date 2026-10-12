@@ -9,6 +9,9 @@ import "google/protobuf/timestamp.proto";
 // Multi-volume morphology residual vector fields after mosaic+Stos volume mapping.
 // Catalogs files written under {root}/{volume_name}/{stos_group}/ by SectionCorrectionBuilder
 // and the GrpcSectionCorrectionService rebuild loop.
+// volume_name is the correction set's annotation database name (Identity AnnotationServer database; the
+// context name when Identity has none). Annotation contexts that share a database and stos_group share one set.
+// Viking learns the service URL, database name and stos_group (RegistrationName) from Identity per context.
 // XY is volume nanometers (annotation DB units * AnnotateMetaData.Scale).
 // Unknown volume_name or stos_group: NOT_FOUND. GetSectionCorrection for a Z with no map: NOT_FOUND.
 service AnnotateSectionCorrections {
