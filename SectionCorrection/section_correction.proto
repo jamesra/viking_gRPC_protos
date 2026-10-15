@@ -21,6 +21,11 @@ service AnnotateSectionCorrections {
   // Last rebuild pass: in-progress flag, timestamps, last error, volume names attempted.
   rpc GetRebuildStatus (GetRebuildStatusRequest) returns (RebuildStatus);
 
+  // Starts a rebuild in the background and returns at once; poll GetRebuildStatus for progress.
+  // Only accepted from the service host itself (loopback), which is how the container's
+  // correction-menu console reaches it. Other callers: PERMISSION_DENIED.
+  rpc RebuildVolume (RebuildVolumeRequest) returns (RebuildVolumeResponse);
+
   // Published StosGroup correction sets. Empty volume_name lists every volume.
   rpc ListCorrectionSets (ListCorrectionSetsRequest) returns (ListCorrectionSetsResponse);
 
@@ -77,6 +82,25 @@ message RebuildStatus {
   // published field built_utc is unchanged. Use with CorrectionProvenance.built_utc to
   // invalidate CorrectStructures client caches.
   string service_version = 6;
+  // Progress of the running (or last) rebuild. A group is one (database, StosGroup) correction set.
+  string current_volume = 7;
+  // Latest message from the builder for the group being built; empty when idle.
+  string current_step = 8;
+  int32 groups_done = 9;
+  int32 groups_total = 10;
+}
+
+message RebuildVolumeRequest {
+  // Annotation database name as listed by ListVolumes. Empty rebuilds every volume.
+  string volume_name = 1;
+  // Rebuild even when the published set is current (same as Rebuild:Force for this run).
+  bool force = 2;
+}
+
+message RebuildVolumeResponse {
+  // False when a rebuild is already running; message says why.
+  bool started = 1;
+  string message = 2;
 }
 
 message ListCorrectionSetsRequest {
