@@ -144,6 +144,13 @@ message SegmentTilesRequest {
   // refuses a request whose model_id differs from the one it serves (FAILED_PRECONDITION). Unset is
   // accepted unless the model's manifest says requires_model_id.
   optional string model_id = 13;
+  // How many FOREGROUND MaskTile entries follow this message on the stream, in SegmentTilesStreamRequest.mask_tiles
+  // messages (any number of them): every tile the seed or correction touches, each once. The server reads all of
+  // them, waiting up to the idle limit it uses for a TilesAnswer, before growth starts. 0 means the request has no
+  // mask tiles. A request that announces any also gets BACKGROUND mask tiles on demand (TilesNeeded.masks).
+  // Refused with INVALID_ARGUMENT when more FOREGROUND tiles arrive than announced, and RESOURCE_EXHAUSTED when the
+  // count is over the server's limit (default 256, SEGMENTATION_MAX_MASK_TILES).
+  uint32 foreground_mask_tile_count = 14;
 }
 
 // One thing the user knows about the image: any mix of points, a rectangle and a mask. Used as the
@@ -196,6 +203,37 @@ message Mask {
   optional uint32 scale = 3;
 }
 
+// Which side of the segmentation a mask tile belongs to.
+enum MaskKind {
+  MASK_KIND_UNSPECIFIED = 0;
+  // The object: the seed or correction. Which of the two stays in Feature.mask_role.
+  MASK_KIND_FOREGROUND = 1;
+  // Not the object: the neighbors.
+  MASK_KIND_BACKGROUND = 2;
+}
+
+// One 1024x1024 piece of a mask prompt, on the same grid as the image tiles, so a mask of any size is sent as the
+// tiles it touches. coord must be in the same volume, section, channel, transform and downsample as the request's
+// image tiles. Mask tiles are per request: they never enter the image cache and are not shared between streams.
+// A (coord, kind) is sent once; a repeat is INVALID_ARGUMENT.
+message MaskTile {
+  TileCoord coord = 1;
+  MaskKind kind = 2;
+  // Every pixel of the tile is mask. png must then be empty.
+  bool full = 3;
+  // Otherwise a 1-bit greyscale PNG, Y down like the image tile, where a non-zero pixel is mask: 1024x1024 when scale
+  // is 0 or 1, 256x256 when scale is 4. A tile with nothing in it is sent with an empty png and full false, which
+  // says "no mask here", unlike a tile that has not been sent yet.
+  bytes png = 4;
+  // Mosaic pixels per PNG pixel: 0 or 1 (full resolution) or 4 (SAM2's own 256x256 sample grid, each sample covering
+  // 4x4 pixels; the server expands it by nearest neighbour). No other value is accepted.
+  uint32 scale = 5;
+}
+
+message MaskTiles {
+  repeated MaskTile tiles = 1;
+}
+
 // Client to server on SegmentTilesStream.
 message SegmentTilesStreamRequest {
   oneof body {
@@ -203,6 +241,10 @@ message SegmentTilesStreamRequest {
     SegmentTilesRequest start = 1;
     // Reply to the latest TilesNeeded.
     TilesAnswer answer = 2;
+    // Mask tiles: the FOREGROUND ones announced by SegmentTilesRequest.foreground_mask_tile_count, sent straight
+    // after start, and BACKGROUND ones, either answering TilesNeeded.masks (before the TilesAnswer) or sent early,
+    // for example with the start windows' image tiles. The server does not ask again for a tile it already holds.
+    MaskTiles mask_tiles = 3;
   }
 }
 
@@ -213,6 +255,8 @@ message TilesAnswer {
   repeated TileCoord ready = 1;
   // Tiles the client could not supply (capture failed, off the volume). Growth does not enter them.
   repeated TileCoord unavailable = 2;
+  // BACKGROUND mask tiles from TilesNeeded.masks the client cannot supply. They are treated as having no neighbors.
+  repeated TileCoord masks_unavailable = 3;
 }
 
 // Server to client on SegmentTilesStream.
@@ -226,7 +270,14 @@ message SegmentTilesStreamResponse {
 }
 
 message TilesNeeded {
+  // Image tiles to upload with UploadTile.
   repeated TileCoord tiles = 1;
+  // Tiles whose BACKGROUND mask this request needs. The server lists every tile a window it is about to predict
+  // covers whose background it does not hold yet, whether or not that tile's image is cached. Answer with
+  // MaskTiles messages (an empty tile for a tile with no neighbors), then the TilesAnswer; list any the client
+  // cannot supply in TilesAnswer.masks_unavailable. A window is predicted only when its image tiles and its
+  // background mask tiles are all present.
+  repeated TileCoord masks = 2;
 }
 
 // Request to delete a cached image
@@ -296,6 +347,9 @@ message ServerStatusResponse {
   // Which model this server serves, from the model's manifest (<weights stem>.model.json). Always set; a
   // model with no manifest reports model_id "unknown" and the legacy encoding.
   ModelInfo model = 12;
+  // True when this server accepts mask tiles (SegmentTilesRequest.foreground_mask_tile_count and the MaskTiles
+  // stream message). A client falls back to the single Feature.mask when it is false or the server predates the field.
+  bool mask_tiles = 13;
 }
 
 // The identity and feeding contract of the model a server serves. Everything here comes from the model's
