@@ -180,11 +180,20 @@ enum MaskRole {
 message Mask {
   // The rectangle, inclusive corners. When png is empty every pixel inside it is the mask.
   BoundingBox bounds = 1;
-  // Optional bitmap: a PNG exactly (x_max - x_min + 1) wide and (y_max - y_min + 1) high, in mosaic
-  // pixels at the tiles' downsample, where a non-zero pixel is in the mask. Image row 0 is y_max (images
-  // are Y down; mosaic coordinates are Y up). At most 1024 x 1024,
-  // SAM2's input size; clients should send it 1-bit greyscale, which is a few hundred bytes for a few shapes.
+  // Optional bitmap: a PNG ceil(width / scale) wide and ceil(height / scale) high, where width is
+  // (x_max - x_min + 1) and height is (y_max - y_min + 1), in mosaic pixels at the tiles' downsample.
+  // A non-zero pixel is in the mask. With the default scale of 1 that is exactly the bounds' size.
+  // Image row 0 is y_max (images are Y down; mosaic coordinates are Y up). There is no limit on the
+  // PNG's side beyond the server's pixel limit on the bounds, so a region spanning many cells can be
+  // sent whole; the server reads from it only what falls in the windows it visits. Clients should send
+  // it 1-bit greyscale, which is a few hundred bytes for a few shapes.
   bytes png = 2;
+  // Mosaic pixels per PNG pixel, along both axes, for a region too large to send at full resolution.
+  // Unset, 0 and 1 mean one PNG pixel per mosaic pixel. With n > 1, PNG pixel (c, r) stands for the
+  // n x n block of mosaic pixels whose low-x, high-y corner is (x_min + c * n, y_max - r * n); blocks
+  // at the right and bottom edges are clipped to the bounds. The server expands each PNG pixel to its
+  // block (nearest neighbour), so the mask edge is only as sharp as one PNG pixel. Ignored when png is empty.
+  optional uint32 scale = 3;
 }
 
 // Client to server on SegmentTilesStream.
