@@ -140,6 +140,10 @@ message SegmentTilesRequest {
   // Feature's points are SAM2 background clicks, its rectangle says the background is most likely
   // inside it, and its mask says everything inside is background and the mask should grow beyond it.
   optional Feature background_feature = 12;
+  // The model the client built these prompts for (ModelInfo.model_id from GetServerStatus). The server
+  // refuses a request whose model_id differs from the one it serves (FAILED_PRECONDITION). Unset is
+  // accepted unless the model's manifest says requires_model_id.
+  optional string model_id = 13;
 }
 
 // One thing the user knows about the image: any mix of points, a rectangle and a mask. Used as the
@@ -157,6 +161,19 @@ message Feature {
   // a client with several shapes sums (unions) them into one Mask. A foreground mask and a background
   // mask are the same message; a circle seed is a mask whose bitmap is the disc.
   optional Mask mask = 3;
+  // What a foreground mask is. Ignored for a background Feature. UNSPECIFIED is a seed.
+  MaskRole mask_role = 4;
+}
+
+// What a foreground mask is, for a model that encodes the two differently (a manifest lists the roles it
+// expects in client_contract.mask_roles).
+enum MaskRole {
+  // Not set. The server treats a foreground mask as a seed.
+  MASK_ROLE_UNSPECIFIED = 0;
+  // A trusted starting shape, such as a circle disc: the object is inside it.
+  MASK_ROLE_SEED = 1;
+  // An existing mask the user wants corrected. It may be wrong, so the model trusts it less than a seed.
+  MASK_ROLE_CORRECTION = 2;
 }
 
 // A mask prompt: a bitmap of any shape inside a rectangle of bounds.
@@ -239,8 +256,8 @@ enum ResolutionMode {
   RESOLUTION_MODE_MULTI = 2;
 }
 
-// How one model wants to be fed. Today the server reports the single loaded model; a list of
-// named models is expected to reuse this message.
+// How one model wants to be fed. The server reports the one model it serves, from that model's
+// manifest (see ModelInfo); a list of named models is expected to reuse this message.
 message ModelCapabilities {
   SubmissionMode submission_mode = 1;
   ResolutionMode resolution_mode = 2;
@@ -267,6 +284,32 @@ message ServerStatusResponse {
   string encoder_generation = 10;
   // State of the background encoder compile: "off", "warming", "ready" or "failed".
   string compile_status = 11;
+  // Which model this server serves, from the model's manifest (<weights stem>.model.json). Always set; a
+  // model with no manifest reports model_id "unknown" and the legacy encoding.
+  ModelInfo model = 12;
+}
+
+// The identity and feeding contract of the model a server serves. Everything here comes from the model's
+// manifest, which travels with the weights, so a client reads what the model's files say.
+message ModelInfo {
+  // The model's version number, v<VERSION>, such as "v4". Send it back in requests as model_id. Not the training
+  // data's number: that is training_data_set.
+  string model_id = 1;
+  // One export of that model, v<VERSION>.<EPOCH>, such as "v4.3" (the trainer's epoch index, counted from 0).
+  string model_version = 2;
+  string display_name = 3;
+  // The mask-prompt encoding the server builds mask_input with, such as "edge-confidence-v6" or
+  // "legacy-flat-v1".
+  string prompt_encoding = 4;
+  // The training data the model saw, apart from the model's own version: the data folder (such as "v3")
+  // and a short fingerprint of its manifest, approved and ignore files. "unknown" when not recorded.
+  string training_data_set = 5;
+  string training_data_fingerprint = 6;
+  // The manifest's client_contract object verbatim, as JSON: what the client must do to its masks before
+  // it sends them (circle_diameter_scale, mask_roles, background_mask, requires_model_id, ...).
+  string contract_json = 7;
+  // What the operator wrote about this model in its manifest: what changed, what to use it for. May be empty.
+  string description = 8;
 }
 
 // Request message containing the image and coordinates for single-point segmentation
@@ -283,6 +326,9 @@ message SegmentationRequest {
   bool multimask_output = 7;
   // When true, skip the full-frame labeled image PNG. Viking does not use it.
   bool omit_labeled_image = 8;
+  // The model the client built this request for (ModelInfo.model_id). A different model_id is refused
+  // with FAILED_PRECONDITION. Unset is accepted unless the model's manifest says requires_model_id.
+  optional string model_id = 9;
 }
 
 // One independent auto-segmentation prompt set for a cached image.
@@ -293,6 +339,9 @@ message SegmentImageSetRequest {
   repeated Point foreground = 2;
   repeated Point background = 3;
   bool multimask_output = 4;
+  // The model the client built this request for (ModelInfo.model_id). Checked on the first message of the
+  // stream; see SegmentationRequest.model_id.
+  optional string model_id = 5;
 }
 
 // Request message for segmenting with multiple labeled points (id=0 for background, id!=0 for foreground)
@@ -309,6 +358,8 @@ message MultiSegmentationRequest {
   bool multimask_output = 6;
   // When true, skip the full-frame labeled image PNG. Viking does not use it.
   bool omit_labeled_image = 7;
+  // The model the client built this request for (ModelInfo.model_id); see SegmentationRequest.model_id.
+  optional string model_id = 8;
 }
 
 // Point coordinates
