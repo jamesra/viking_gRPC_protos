@@ -15,13 +15,13 @@ service SegmentationService {
   // cells it has, then streams TilesNeeded for the cells the mask reached that it does not have,
   // waits for the client's TilesAnswer, and continues the same growth with them. When nothing more
   // is needed it streams the finished SegmentationResponse and ends the call.
-  // The client sends exactly one `start`, then (when it uses mask tiles) its FOREGROUND mask_tiles messages,
-  // then one `answer` per TilesNeeded, sending BACKGROUND mask_tiles before an answer for the masks asked for.
+  // The client sends exactly one `start`, then its foreground_mask_tile_count FOREGROUND tiles in mask_tiles
+  // messages, then one `answer` per TilesNeeded, sending BACKGROUND mask_tiles before an answer for the masks asked for.
   //
   // Ending: after `result` the call ends OK. A client that cancels gets no result (the call is gone).
   // A client that leaves TilesNeeded unanswered for the server's idle limit (default 60 s) gets
   // DEADLINE_EXCEEDED. Other statuses: INVALID_ARGUMENT for a malformed conversation or request,
-  // NOT_FOUND ("TILE_NOT_FOUND row=.. col=..") when a tile holding a foreground point is not cached,
+  // NOT_FOUND ("TILE_NOT_FOUND row=.. col=..") when a tile holding a foreground click is not cached,
   // RESOURCE_EXHAUSTED also when the foreground mask is over the server's tile limit (see MaskTile),
   // FAILED_PRECONDITION ("NO_MATCHING_MASK ...") when the starting cell yields no mask that fits the
   // prompt, RESOURCE_EXHAUSTED when the request is over the server's size limits, UNAVAILABLE when the
@@ -109,11 +109,17 @@ enum ResponseContent {
 
 // Points are mosaic pixels at the tiles' downsample: X right, Y up (world / downsample).
 // The server refuses a request over its limits with RESOURCE_EXHAUSTED, naming the limit: by default
-// 64 tiles, 512 foreground plus background points, and 16 boxes (see the server README).
+// 64 tiles, 512 foreground plus background points, and 16 rectangles (see the server README).
+//
+// The prompt is the two Features and the mask tiles. Clicks are foreground_feature.points and
+// background_feature.points. Anything that is object is a FOREGROUND mask tile, never a box: a rectangle is only
+// a hint. A request needs a foreground click, a foreground rectangle or a FOREGROUND mask tile (INVALID_ARGUMENT
+// otherwise).
 message SegmentTilesRequest {
+  // The legacy prompt fields, replaced by the Features: foreground and background clicks, and SAM2 box prompts.
+  reserved 2, 3, 8;
+  reserved "foreground", "background", "foreground_boxes";
   repeated TileCoord tiles = 1;
-  repeated Point foreground = 2;
-  repeated Point background = 3;
   bool multimask_output = 4;
   bool omit_labeled_image = 5;
   // Logit above which a pixel is object. Higher values shrink the mask; lower values grow it.
@@ -122,10 +128,6 @@ message SegmentTilesRequest {
   // When true, each cell prediction is run twice: the second pass is given the first
   // pass's low-resolution logits as SAM2's mask_input along with the same prompts.
   bool use_mask_input = 7;
-  // SAM2 box prompts in mosaic pixels (same frame as the points). When present the server uses exactly
-  // these boxes and sends exactly the foreground points given, instead of looking for nine-click
-  // circles to box. A window uses the box with the most area inside it; SAM2 takes one box per call.
-  repeated BoundingBox foreground_boxes = 8;
   // Client-issued ticket, echoed in SegmentationResponse.request_id and written to the server log and
   // debug dump so one client log line can be matched to one server result. The server does not order
   // or cancel by it: only the client knows which of its requests is still wanted. 0 means not set.
@@ -133,48 +135,40 @@ message SegmentTilesRequest {
   // ResponseContent flags OR-ed together. 0 keeps the previous answer (MASKS | POLYGONS, upscaled).
   // Only SegmentTilesStream honours it: it is the one path that fuses logits across cells.
   uint32 response_content = 10;
-  // What the object is, as one Feature, in addition to the legacy foreground, foreground_boxes fields
-  // (the server merges them; new clients should use only the Feature). A foreground Feature's rectangle
-  // says the objects are most likely inside it and its mask says everything inside is object and the
-  // mask should grow beyond it.
+  // What the object is: the foreground clicks, rectangle hints, and the role of the FOREGROUND mask tiles.
   optional Feature foreground_feature = 11;
-  // What the object is not, as one Feature, in addition to the legacy background field. A background
-  // Feature's points are SAM2 background clicks, its rectangle says the background is most likely
-  // inside it, and its mask says everything inside is background and the mask should grow beyond it.
+  // What the object is not: the background clicks and rectangle hints. The neighbouring annotations are
+  // BACKGROUND mask tiles, which the server asks for (TilesNeeded.masks).
   optional Feature background_feature = 12;
   // The model the client built these prompts for (ModelInfo.model_id from GetServerStatus). The server
   // refuses a request whose model_id differs from the one it serves (FAILED_PRECONDITION). Unset is
   // accepted unless the model's manifest says requires_model_id.
   optional string model_id = 13;
-  // Set (even to 0) by a client that sends its masks as MaskTiles instead of Feature.mask. It is how many
-  // FOREGROUND MaskTiles the client sends, in mask_tiles messages right after `start`: one for every tile the
-  // seed or correction touches, each once (0 for a request with no foreground mask, such as clicks only). The
-  // server waits for all of them before growth starts, and a count that is never reached ends the call with
-  // DEADLINE_EXCEEDED after the same idle limit as an unanswered TilesNeeded. More FOREGROUND tiles than
-  // announced is INVALID_ARGUMENT; a count over the server's limit (default 256, SEGMENTATION_MAX_MASK_TILES) is
-  // RESOURCE_EXHAUSTED, refused before any tile is read. Setting it, even to 0, also says the client serves
-  // BACKGROUND tiles on request (TilesNeeded.masks) and may send them early. Unset means an older client: the
-  // server never asks it for mask tiles, and a mask_tiles message from it is INVALID_ARGUMENT. A request must not
-  // use both Feature.mask and mask tiles for the same kind (INVALID_ARGUMENT).
-  optional uint32 foreground_mask_tile_count = 14;
+  // How many FOREGROUND MaskTiles follow `start`, in mask_tiles messages sent before anything else: one for every
+  // tile the seed or correction touches, each once. 0 when there is no foreground mask (clicks or rectangles only).
+  // The server waits for all of them before growth starts, and a count that is never reached ends the call with
+  // DEADLINE_EXCEEDED after the same idle limit as an unanswered TilesNeeded. More FOREGROUND tiles than announced
+  // is INVALID_ARGUMENT; a count over the server's limit (default 256, SEGMENTATION_MAX_MASK_TILES) is
+  // RESOURCE_EXHAUSTED, refused before any tile is read. Every request, whatever its count, is asked for BACKGROUND
+  // tiles (TilesNeeded.masks) and may send them early.
+  uint32 foreground_mask_tile_count = 14;
 }
 
-// One thing the user knows about the image: any mix of points, a rectangle and a mask. Used as the
-// foreground and as the background of SegmentTilesRequest, where the meaning of each part is given.
-// All coordinates are mosaic pixels at the tiles' downsample, X right, Y up, like Point.
+// One side of the prompt of SegmentTilesRequest: clicks and rectangle hints, plus (for the foreground) the role
+// of the FOREGROUND mask tiles. Masks themselves are MaskTiles. All coordinates are mosaic pixels at the tiles'
+// downsample, X right, Y up, like Point.
 message Feature {
-  // Normal SAM2 use: foreground clicks in a foreground Feature, background clicks in a background one.
+  // Was a single Mask. Masks are sent as MaskTiles.
+  reserved 3;
+  reserved "mask";
+  // SAM2 clicks: foreground clicks in the foreground Feature, background clicks in the background one.
   repeated Point points = 1;
-  // Likelihood hints, not claims about every pixel: "most likely inside". SAM2 gets one as a box for
-  // a foreground Feature (the largest that reaches a window; SAM2 takes one box per call). SAM2 has
-  // no background box, so the server passes each background rectangle as a weak negative mask_input.
-  // Ignored in a foreground Feature that has a mask.
+  // Likelihood hints, not claims about every pixel: "most likely inside". Never taken as object; send a
+  // FOREGROUND mask tile for that. SAM2 gets one as a box for the foreground Feature (the largest that reaches a
+  // window; SAM2 takes one box per call). SAM2 has no background box, so the server passes each background
+  // rectangle as a weak negative mask_input. Ignored in the foreground when there are FOREGROUND mask tiles.
   repeated BoundingBox rectangles = 2;
-  // A per-pixel claim that the mask should grow beyond. SAM2 gets it as mask_input. There is only one:
-  // a client with several shapes sums (unions) them into one Mask. A foreground mask and a background
-  // mask are the same message; a circle seed is a mask whose bitmap is the disc.
-  optional Mask mask = 3;
-  // What a foreground mask is. Ignored for a background Feature. UNSPECIFIED is a seed.
+  // What the FOREGROUND mask tiles are. Ignored for the background Feature. UNSPECIFIED is a seed.
   MaskRole mask_role = 4;
 }
 
@@ -189,26 +183,6 @@ enum MaskRole {
   MASK_ROLE_CORRECTION = 2;
 }
 
-// A mask prompt: a bitmap of any shape inside a rectangle of bounds.
-message Mask {
-  // The rectangle, inclusive corners. When png is empty every pixel inside it is the mask.
-  BoundingBox bounds = 1;
-  // Optional bitmap: a PNG ceil(width / scale) wide and ceil(height / scale) high, where width is
-  // (x_max - x_min + 1) and height is (y_max - y_min + 1), in mosaic pixels at the tiles' downsample.
-  // A non-zero pixel is in the mask. With the default scale of 1 that is exactly the bounds' size.
-  // Image row 0 is y_max (images are Y down; mosaic coordinates are Y up). There is no limit on the
-  // PNG's side beyond the server's pixel limit on the bounds, so a region spanning many cells can be
-  // sent whole; the server reads from it only what falls in the windows it visits. Clients should send
-  // it 1-bit greyscale, which is a few hundred bytes for a few shapes.
-  bytes png = 2;
-  // Mosaic pixels per PNG pixel, along both axes, for a region too large to send at full resolution.
-  // Unset, 0 and 1 mean one PNG pixel per mosaic pixel. With n > 1, PNG pixel (c, r) stands for the
-  // n x n block of mosaic pixels whose low-x, high-y corner is (x_min + c * n, y_max - r * n); blocks
-  // at the right and bottom edges are clipped to the bounds. The server expands each PNG pixel to its
-  // block (nearest neighbour), so the mask edge is only as sharp as one PNG pixel. Ignored when png is empty.
-  optional uint32 scale = 3;
-}
-
 // Which side of a request a MaskTile belongs to. Whether a foreground mask is a seed or a correction stays
 // Feature.mask_role.
 enum MaskKind {
@@ -219,9 +193,9 @@ enum MaskKind {
   MASK_KIND_BACKGROUND = 2;
 }
 
-// One tile of a mask prompt, on the same grid as the image tiles and named by the same TileCoord. A mask
-// larger than one window is sent as the tiles it touches instead of one large Mask, so the client never
-// merges or coarsens it and the server reads only the tiles a window covers. Mask tiles belong to one request: they
+// One tile of a mask prompt, on the same grid as the image tiles and named by the same TileCoord. A mask of any
+// size is sent as the tiles it touches, so the client never merges or coarsens it and the server reads only the
+// tiles a window covers. Mask tiles belong to one request: they
 // never enter the image cache and are not shared between streams.
 message MaskTile {
   // The cell this tile covers. Its downsample must be the request's tiles' downsample; another one is
@@ -286,8 +260,7 @@ message SegmentTilesStreamResponse {
 message TilesNeeded {
   // Image tiles to upload with UploadTile.
   repeated TileCoord tiles = 1;
-  // Tiles whose BACKGROUND mask this request needs, for a client that set foreground_mask_tile_count. The
-  // server asks for one for every tile a window it is about to predict covers, whether or not that tile's image
+  // Tiles whose BACKGROUND mask this request needs. The server asks for one for every tile a window it is about to predict covers, whether or not that tile's image
   // is cached (so `tiles` may be empty here). The client answers with mask_tiles messages, empty tiles included,
   // then the TilesAnswer. A window is predicted only when its image tiles and its BACKGROUND mask tiles are all
   // present.
@@ -361,9 +334,9 @@ message ServerStatusResponse {
   // Which model this server serves, from the model's manifest (<weights stem>.model.json). Always set; a
   // model with no manifest reports model_id "unknown" and the legacy encoding.
   ModelInfo model = 12;
-  // True when SegmentTilesStream accepts mask tiles (MaskTile, foreground_mask_tile_count, TilesNeeded.masks). A
-  // client that does not see it sends masks as Feature.mask.
-  bool mask_tiles = 13;
+  // Was mask_tiles, a flag for servers that accepted mask tiles. Every server does now.
+  reserved 13;
+  reserved "mask_tiles";
 }
 
 // The identity and feeding contract of the model a server serves. Everything here comes from the model's
