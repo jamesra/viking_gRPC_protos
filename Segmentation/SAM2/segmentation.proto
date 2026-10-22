@@ -61,9 +61,8 @@ message UploadImageResponse {
 // This is the reusable cross-client cache key (not a sequential image_id). The server takes two uploads
 // with one key to be the same picture, so `channel` must name everything besides the other fields that
 // changes the render (a blend of channels and its colours, view options drawn into the capture).
-// Cells are in the section's mosaic space: the assembled section image before any slice-to-volume
-// registration (stos) warps it. Row and column are floor(mosaic / (1024 * downsample)), with the grid
-// origin at mosaic (0, 0); row increases with mosaic Y.
+// Cells are in the coordinate space `space` names. Row and column are floor(position / (1024 * downsample))
+// in that space, with the grid origin at (0, 0); row increases with Y.
 message TileCoord {
   // VikingXML volume name.
   string volume = 1;
@@ -71,12 +70,26 @@ message TileCoord {
   // Channel name, plus a bracketed suffix for anything else drawn into the capture (see above). A bare
   // channel name is a plain greyscale view, the only kind a server reads from the volume's tileset itself.
   string channel = 3;
-  // "<volume transform>|<section tile transform>". The volume part (a StosGroup) is empty in mosaic space, the
-  // only space a server reads tilesets in; the section part names the .mosaic a pyramid is placed with.
+  // "<volume transform>|<section tile transform>": the StosGroup (empty in mosaic space) and the .mosaic a
+  // pyramid is placed with.
   string transform = 4;
   int32 downsample = 5;
   int32 row = 6;
   int32 col = 7;
+  // The space the cell, and every prompt and result of a request naming it, is in. Part of the cache key, so a
+  // mosaic cell and a volume cell never share an entry. A server reads tilesets itself only for MOSAIC.
+  CoordinateSpace space = 8;
+}
+
+// Which coordinate space tiles, prompts and results are in.
+enum CoordinateSpace {
+  // Not set: taken as VOLUME, what clients sent before this field existed. To be refused once every
+  // released client sets the space.
+  COORDINATE_SPACE_UNSPECIFIED = 0;
+  // The section's assembled mosaic image, before any slice-to-volume registration (stos) warps it.
+  COORDINATE_SPACE_MOSAIC = 1;
+  // The volume: the section after its slice-to-volume transform (the StosGroup in TileCoord.transform).
+  COORDINATE_SPACE_VOLUME = 2;
 }
 
 message UploadTileRequest {
@@ -116,7 +129,7 @@ enum ResponseContent {
   RESPONSE_CONTENT_NO_UPSCALE = 8;
 }
 
-// Points are mosaic pixels at the tiles' downsample: X right, Y up (section mosaic coordinates / downsample).
+// Points are mosaic pixels at the tiles' downsample: X right, Y up (positions in the tiles' TileCoord.space / downsample).
 // The server refuses a request over its limits with RESOURCE_EXHAUSTED, naming the limit: by default
 // 64 tiles, 512 foreground plus background points, and 16 rectangles (see the server README).
 //
@@ -163,8 +176,9 @@ message SegmentTilesRequest {
   // tiles (TilesNeeded.masks) and may send them early.
   uint32 foreground_mask_tile_count = 14;
   // The Identity annotation context the client has open, 0 when it has none. A server the context is local
-  // to (Identity's segmentation-service local resources) reads plain greyscale cells from the context's
-  // VikingXML tileset itself and does not ask the client for them; any other cell is asked for as before.
+  // to (Identity's segmentation-service local resources) reads plain greyscale COORDINATE_SPACE_MOSAIC cells
+  // from the context's VikingXML tileset itself and does not ask the client for them; any other cell is asked
+  // for as before.
   int64 annotation_context_id = 15;
 }
 
@@ -469,7 +483,7 @@ message SegmentationResponse {
   // List of segment results
   repeated SegmentResult segments = 4;
 
-  // Bottom-left of the fused mosaic in downsample pixels of the section's mosaic space (Y increases upward).
+  // Bottom-left of the fused mosaic in downsample pixels of the request tiles' TileCoord.space (Y increases upward).
   // SegmentImage leaves these at 0; the mosaic is the uploaded viewport.
   int32 origin_x = 5;
   int32 origin_y = 6;
