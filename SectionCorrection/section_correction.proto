@@ -83,7 +83,6 @@ message RebuildStatus {
   google.protobuf.Timestamp last_started_utc = 2;
   google.protobuf.Timestamp last_completed_utc = 3;
   string last_error = 4;
-  repeated string last_volumes = 5;
   // Host assembly version. Changes on algorithm / CorrectStructures deploys even when
   // published field built_utc is unchanged. Use with CorrectionProvenance.built_utc to
   // invalidate CorrectStructures client caches.
@@ -129,8 +128,6 @@ message ListCorrectedSectionsRequest {
 }
 
 message ListCorrectedSectionsResponse {
-  string volume_name = 1;
-  string stos_group = 2;
   repeated int64 z = 3;
 }
 
@@ -141,25 +138,12 @@ message GetCorrectionManifestRequest {
 
 message CorrectionProvenance {
   google.protobuf.Timestamp built_utc = 1;
-  google.protobuf.Timestamp annotation_watermark = 2;
   double pitch_nm = 3;
   double kernel_radius_nm = 4;
-  int32 min_annotation_votes = 5;
-  ResidualWindow residual_window = 6;
-}
-
-message ResidualWindow {
-  int32 min_both = 1;
-  int32 max_both = 2;
-  int32 min_one = 3;
-  int32 max_one = 4;
 }
 
 message CorrectionManifest {
-  string volume_name = 1;
-  string stos_group = 2;
   CorrectionProvenance provenance = 3;
-  string volume_url = 4;
   repeated int64 z = 5;
 }
 
@@ -169,12 +153,8 @@ message GetSectionCorrectionRequest {
   int64 z = 3;
 }
 
+// Node (gx, gy) sits at (gx * pitch_nm, gy * pitch_nm) in volume nanometers.
 message SectionCorrection {
-  string volume_name = 1;
-  string stos_group = 2;
-  int64 z = 3;
-  double origin_x_nm = 4;
-  double origin_y_nm = 5;
   double pitch_nm = 6;
   repeated LatticeVector nodes = 7;
 }
