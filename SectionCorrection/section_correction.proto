@@ -48,6 +48,12 @@ service AnnotateSectionCorrections {
   // Neighbor samples the published residual field. CurveFit is leave-one-out Catmull-Rom
   // on the process graph. Omitted correction is All (Neighbor then CurveFit).
   rpc CorrectStructures (CorrectStructuresRequest) returns (CorrectStructuresResponse);
+
+  // Current annotation fingerprint of structures, from SQL aggregates only (no volume load, no fit): milliseconds.
+  // Compare annotation_fingerprint with the one a cached CorrectStructuresResponse carries; if they differ, or
+  // service_version or the set's CorrectionProvenance.built_utc changed, re-fetch CorrectStructures.
+  // Empty structure_ids: INVALID_ARGUMENT. Unknown volume_name: FAILED_PRECONDITION.
+  rpc GetStructureFingerprint (GetStructureFingerprintRequest) returns (GetStructureFingerprintResponse);
 }
 
 // Same flag values as AnnotationVizLib.CorrectionMode. Unset on the request means All.
@@ -224,8 +230,28 @@ message CorrectStructuresResponse {
   string service_version = 4;
   // Newest location LastModified or LocationLink Created among the requested structures (and their children when
   // include_children was set), in UTC. Unset when they have no locations. It moves on every insert or edit but NOT
-  // on a delete: removing a location or link leaves the newest remaining time unchanged.
+  // on a delete: removing a location or link leaves the newest remaining time unchanged. For staleness checks use
+  // annotation_fingerprint, which also changes on a delete.
   google.protobuf.Timestamp annotation_watermark = 5;
+  // Opaque; equal values mean the same annotation rows. Read before the rows, so an edit made during the call leaves
+  // an older value here and the next GetStructureFingerprint check reports a change. Compare by string equality only.
+  string annotation_fingerprint = 6;
+}
+
+message GetStructureFingerprintRequest {
+  string volume_name = 1;
+  repeated int64 structure_ids = 2;
+  // Must match the CorrectStructuresRequest.include_children of the response being checked.
+  bool include_children = 3;
+}
+
+message GetStructureFingerprintResponse {
+  string volume_name = 1;
+  // Same meaning as CorrectStructuresResponse.annotation_fingerprint / annotation_watermark.
+  string annotation_fingerprint = 2;
+  google.protobuf.Timestamp annotation_watermark = 3;
+  // Same as RebuildStatus.service_version.
+  string service_version = 4;
 }
 
 message CorrectedXY {
