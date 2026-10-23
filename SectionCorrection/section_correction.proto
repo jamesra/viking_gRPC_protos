@@ -222,6 +222,10 @@ message CorrectStructuresResponse {
   repeated CorrectedLocation locations = 3;
   // Same as RebuildStatus.service_version — echo for CorrectStructures cache keys.
   string service_version = 4;
+  // Newest location LastModified or LocationLink Created among the requested structures (and their children when
+  // include_children was set), in UTC. Unset when they have no locations. It moves on every insert or edit but NOT
+  // on a delete: removing a location or link leaves the newest remaining time unchanged.
+  google.protobuf.Timestamp annotation_watermark = 5;
 }
 
 message CorrectedXY {
