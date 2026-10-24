@@ -1,0 +1,202 @@
+syntax = "proto3";
+
+option csharp_namespace = "Viking.SectionCorrectionServiceTypes.gRPC.V2.Protos";
+
+package Viking.SectionCorrectionServiceTypes.gRPC.V2;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// Version 2 of the section-correction protocol. The host serves V1 (section_correction.proto) alongside it until every
+// client has moved; then V1 is removed. A distinct package makes V2 a distinct gRPC service on the same address.
+//
+// Residual registration fields after mosaic + Stos volume mapping, one correction set per (volume, StosGroup).
+// volume_name is the set's annotation database name (Identity AnnotationServer database; the context name when Identity
+// has none). Viking learns the service URL, database name and StosGroup (RegistrationName) from Identity per context.
+// All positions and offsets are volume nanometers (annotation DB units * AnnotateMetaData.Scale).
+// An unknown correction set: NOT_FOUND.
+service AnnotateSectionCorrections {
+  // Volumes this host rebuilds: Identity contexts that have an annotation database, one entry per database.
+  rpc ListVolumes (google.protobuf.Empty) returns (ListVolumesResponse);
+
+  // The current or last rebuild pass.
+  rpc GetRebuildStatus (google.protobuf.Empty) returns (RebuildStatus);
+
+  // Starts a rebuild in the background and returns at once; poll GetRebuildStatus for progress.
+  // Only accepted from the service host itself (loopback), which is how the container's correction-menu console
+  // reaches it. Other callers: PERMISSION_DENIED.
+  rpc RebuildVolume (RebuildVolumeRequest) returns (RebuildVolumeResponse);
+
+  // Published correction sets with their provenance and section list.
+  rpc ListCorrectionSets (ListCorrectionSetsRequest) returns (ListCorrectionSetsResponse);
+
+  // The sparse lattice of one section, to interpolate locally. A section with no map: NOT_FOUND.
+  rpc GetSectionCorrection (GetSectionCorrectionRequest) returns (SectionCorrection);
+
+  // Samples the published field at points the caller already holds. Empty sections, a section with no points, or a
+  // repeated z: INVALID_ARGUMENT.
+  rpc CorrectPoints (CorrectPointsRequest) returns (CorrectPointsResponse);
+
+  // Loads the structures' locations (and child structures when asked), then applies the correction.
+  rpc CorrectStructures (CorrectStructuresRequest) returns (CorrectStructuresResponse);
+
+  // What CorrectStructures would stamp its answer with now, from SQL aggregates and the set catalog only (no volume
+  // load, no fit): well under a second. Re-fetch a cached CorrectStructures answer when its stamp differs.
+  rpc GetAnswerStamp (CorrectStructuresRequest) returns (AnswerStamp);
+}
+
+message Vector2 {
+  double x = 1;
+  double y = 2;
+}
+
+// One correction set.
+message CorrectionSetId {
+  string volume_name = 1;
+  string stos_group = 2;
+}
+
+// Neighbor samples the published residual field; CurveFit is leave-one-out Catmull-Rom along each process.
+enum CorrectionMode {
+  // Neighbor, then CurveFit. The default.
+  CORRECTION_MODE_ALL = 0;
+  CORRECTION_MODE_NONE = 1;
+  CORRECTION_MODE_NEIGHBOR = 2;
+  CORRECTION_MODE_CURVE_FIT = 3;
+}
+
+message ListVolumesResponse {
+  repeated VolumeInfo volumes = 1;
+}
+
+message VolumeInfo {
+  string volume_name = 1;
+  string vikingxml_endpoint = 2;
+  string annotation_endpoint = 3;
+}
+
+message RebuildStatus {
+  bool in_progress = 1;
+  google.protobuf.Timestamp last_started_utc = 2;
+  google.protobuf.Timestamp last_completed_utc = 3;
+  string last_error = 4;
+  // Host version; part of every AnswerStamp.
+  string service_version = 5;
+  // Progress of the running (or last) pass. A group is one correction set.
+  string current_volume = 6;
+  // Latest message from the builder for the group being built; empty when idle.
+  string current_step = 7;
+  int32 groups_done = 8;
+  int32 groups_total = 9;
+}
+
+message RebuildVolumeRequest {
+  // A volume_name from ListVolumes. Empty rebuilds every volume.
+  string volume_name = 1;
+  // Rebuild even when the published set is current.
+  bool force = 2;
+}
+
+message RebuildVolumeResponse {
+  // False when a rebuild is already running; message says why.
+  bool started = 1;
+  string message = 2;
+}
+
+message ListCorrectionSetsRequest {
+  // Empty lists every volume.
+  string volume_name = 1;
+}
+
+message ListCorrectionSetsResponse {
+  repeated CorrectionSet sets = 1;
+}
+
+message CorrectionSet {
+  CorrectionSetId id = 1;
+  // When the published field was built; part of every AnswerStamp that samples it.
+  google.protobuf.Timestamp built_utc = 2;
+  double pitch_nm = 3;
+  double kernel_radius_nm = 4;
+  // Sections with a map, ascending.
+  repeated int64 z = 5;
+}
+
+message GetSectionCorrectionRequest {
+  CorrectionSetId set = 1;
+  int64 z = 2;
+}
+
+// Node (gx, gy) sits at (gx * pitch_nm, gy * pitch_nm). Add a sampled offset to a volume point.
+message SectionCorrection {
+  double pitch_nm = 1;
+  repeated LatticeNode nodes = 2;
+}
+
+message LatticeNode {
+  int32 gx = 1;
+  int32 gy = 2;
+  Vector2 offset = 3;
+  // Annotations that support this node.
+  int32 votes = 4;
+}
+
+message SectionPoints {
+  int64 z = 1;
+  repeated Vector2 points = 2;
+}
+
+message CorrectPointsRequest {
+  CorrectionSetId set = 1;
+  repeated SectionPoints sections = 2;
+}
+
+// One entry per request section, in request order; points in request order.
+message CorrectPointsResponse {
+  repeated SectionOffsets sections = 1;
+}
+
+message SectionOffsets {
+  // False when the set has no map for that section: every offset is zero and untrusted.
+  bool found = 1;
+  repeated PointOffset points = 2;
+}
+
+message PointOffset {
+  Vector2 offset = 1;
+  // The point lies on measured support, not merely inside the interpolated lattice.
+  bool trusted = 2;
+}
+
+message CorrectStructuresRequest {
+  CorrectionSetId set = 1;
+  repeated int64 structure_ids = 2;
+  bool include_children = 3;
+  CorrectionMode correction = 4;
+}
+
+message CorrectStructuresResponse {
+  repeated CorrectedLocation locations = 1;
+  AnswerStamp stamp = 2;
+}
+
+message CorrectedLocation {
+  int64 location_id = 1;
+  int64 structure_id = 2;
+  int64 z = 3;
+  // Corrected position.
+  Vector2 position = 4;
+  // Corrected position minus the uncorrected (mosaic mapped through the StosGroup) position.
+  Vector2 offset = 5;
+}
+
+// Everything a CorrectStructures answer depends on. Two answers to the same request with equal stamps are identical.
+message AnswerStamp {
+  string service_version = 1;
+  // built_utc of the correction set the answer sampled; unset when the mode does not sample it or the set is missing.
+  google.protobuf.Timestamp field_built_utc = 2;
+  // Opaque summary of the structures' annotation rows; changes on any insert, edit or delete. Compare by equality.
+  string annotation_fingerprint = 3;
+  // Newest location edit or link creation among the structures (UTC); informational. It does not move on a delete.
+  google.protobuf.Timestamp annotation_watermark = 4;
+}

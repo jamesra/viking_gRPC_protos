@@ -6,6 +6,9 @@ package Viking.SectionCorrectionServiceTypes.gRPC.V1;
 
 import "google/protobuf/timestamp.proto";
 
+// Protocol V1, deprecated: new code uses section_correction_v2.proto. Served alongside V2 until installed Viking
+// builds and SBFSEM-tools have moved, then removed.
+//
 // Multi-volume morphology residual vector fields after mosaic+Stos volume mapping.
 // Catalogs files written under {root}/{volume_name}/{stos_group}/ by SectionCorrectionBuilder
 // and the GrpcSectionCorrectionService rebuild loop.
