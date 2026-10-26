@@ -4,11 +4,11 @@ option csharp_namespace = "Viking.SectionCorrectionServiceTypes.gRPC.V2.Protos";
 
 package Viking.SectionCorrectionServiceTypes.gRPC.V2;
 
+import "Common/geometry.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
-// Version 2 of the section-correction protocol. The host serves V1 (section_correction.proto) alongside it until every
-// client has moved; then V1 is removed. A distinct package makes V2 a distinct gRPC service on the same address.
+// The section-correction protocol (version 2; version 1 is retired). Positions use the shared Viking geometry types.
 //
 // Residual registration fields after mosaic + Stos volume mapping, one correction set per (volume, StosGroup).
 // volume_name is the set's annotation database name (Identity AnnotationServer database; the context name when Identity
@@ -43,11 +43,6 @@ service AnnotateSectionCorrections {
   // What CorrectStructures would stamp its answer with now, from SQL aggregates and the set catalog only (no volume
   // load, no fit): well under a second. Re-fetch a cached CorrectStructures answer when its stamp differs.
   rpc GetAnswerStamp (CorrectStructuresRequest) returns (AnswerStamp);
-}
-
-message Vector2 {
-  double x = 1;
-  double y = 2;
 }
 
 // One correction set.
@@ -127,23 +122,25 @@ message GetSectionCorrectionRequest {
   int64 z = 2;
 }
 
-// Node (gx, gy) sits at (gx * pitch_nm, gy * pitch_nm). Add a sampled offset to a volume point.
+// Node (row, col) sits at (col * pitch_nm, row * pitch_nm). Add a sampled offset to a volume point.
 message SectionCorrection {
   double pitch_nm = 1;
   repeated LatticeNode nodes = 2;
 }
 
 message LatticeNode {
-  int32 gx = 1;
-  int32 gy = 2;
-  Vector2 offset = 3;
+  // Was gx and gy.
+  reserved 1, 2;
+  reserved "gx", "gy";
+  viking.geometry.v1.GridCell node = 5;
+  viking.geometry.v1.Vector2 offset = 3;
   // Annotations that support this node.
   int32 votes = 4;
 }
 
 message SectionPoints {
   int64 z = 1;
-  repeated Vector2 points = 2;
+  repeated viking.geometry.v1.Vector2 points = 2;
 }
 
 message CorrectPointsRequest {
@@ -163,7 +160,7 @@ message SectionOffsets {
 }
 
 message PointOffset {
-  Vector2 offset = 1;
+  viking.geometry.v1.Vector2 offset = 1;
   // The point lies on measured support, not merely inside the interpolated lattice.
   bool trusted = 2;
 }
@@ -185,9 +182,9 @@ message CorrectedLocation {
   int64 structure_id = 2;
   int64 z = 3;
   // Corrected position.
-  Vector2 position = 4;
+  viking.geometry.v1.Vector2 position = 4;
   // Corrected position minus the uncorrected (mosaic mapped through the StosGroup) position.
-  Vector2 offset = 5;
+  viking.geometry.v1.Vector2 offset = 5;
 }
 
 // Everything a CorrectStructures answer depends on. Two answers to the same request with equal stamps are identical.

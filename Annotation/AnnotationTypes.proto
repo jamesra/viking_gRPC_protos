@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+option csharp_namespace = "Viking.AnnotationServiceTypes.gRPC.V1.Protos";
+
+package Viking.AnnotationServiceTypes.gRPC.V1;
+
+import "Common/geometry.proto";
+import "google/protobuf/timestamp.proto";
+
+// Annotation geometry uses the shared Viking types (Common/geometry.proto): positions are viking.geometry.v1.Vector2,
+// shapes viking.geometry.v1.Shape, regions viking.geometry.v1.Rectangle. AnnotationPoint, Geometry (WKT) and
+// BoundingRectangle were retired with that move.
+
+message AxisUnits{
+    string Units = 1; //nm, mm, etc...
+    double Value = 2; //Scale, ie 5 nm
+}
+
+message Scale {
+    AxisUnits x = 1;
+    AxisUnits y = 2;
+    optional AxisUnits z = 3;
+}
+
+// The annotation types. A Location's type is not sent: it follows from its Shape (the case, Line.closed and the fit).
+// The enum remains because StructureType.AllowedShapes is a bitmask indexed by these values.
+enum AnnotationType
+{
+    POINT = 0;
+    CIRCLE = 1;
+    ELLIPSE = 2;
+    POLYLINE = 3;
+    POLYGON = 4;     //Polygon, no smoothing of exterior verticies with curve fitting
+    OPENCURVE = 5;   //Line segments with a line width, additional control points created using curve fitting function
+    CURVEPOLYGON = 6; //Polygon whose outer and inner verticies are supplimented with a curve fitting function
+    CLOSEDCURVE = 7; //Ring of line segments with a line width
+}
+
+enum DBAction
+{
+    NONE = 0;
+    INSERT = 1;
+    UPDATE = 2;
+    DELETE = 3;
+}
+
+message StructureType {
+  int64 id = 1;
+  optional int64 parent_id = 2;
+  string name = 4;
+  string notes = 5;
+  string attributes = 7;
+  string structure_attributes = 8;
+  bool abstract = 9;
+  uint32 color = 10;
+  string code = 11;
+  string username = 12;
+  google.protobuf.Timestamp created = 15;
+  google.protobuf.Timestamp last_modified = 16;
+  // Bit (1 << AnnotationType) set for each annotation type a structure of this type may use.
+  int32 AllowedShapes = 17;
+  repeated PermittedStructureLink permitted_structure_links = 18;
+}
+
+message Structure {
+  int64 id = 1;
+  optional int64 parent_id = 2;
+  int64 type_id = 3;
+  string notes = 4;
+  bool verified = 5;
+  string attributes = 6;
+  double confidence = 7;
+  repeated StructureLink links = 8;
+  repeated int64 child_ids = 9;
+  string label = 10;
+  string username = 11;
+  google.protobuf.Timestamp created = 12;
+  google.protobuf.Timestamp last_modified = 13;
+}
+
+message StructureLink {
+
+  int64 source_id = 1;
+  int64 target_id = 2;
+  bool bidirectional = 3;
+  string tags = 4;
+  string username = 5;
+}
+
+
+message LocationLink {
+
+  int64 source_id = 1;
+  int64 target_id = 2;
+}
+
+message Location {
+  // Was the positions as AnnotationPoint, the shapes as WKT, closed, radius, width and type_code. The shape now holds
+  // its closed flag, radius and width, and its case is the annotation's type.
+  reserved 4, 5, 6, 7, 8, 13, 14, 15;
+  reserved "mosaic_shape", "volume_shape", "closed", "radius", "width", "type_code";
+
+  int64 id = 1;
+  optional int64 parent_id = 2;
+  int64 section = 3;
+  // The annotation's position in mosaic and in volume space (a circle's centre; for other shapes the position Viking
+  // stores with the location).
+  viking.geometry.v1.Vector2 mosaic_position = 21;
+  viking.geometry.v1.Vector2 volume_position = 22;
+  // The shape in mosaic space (the section's own mosaic pixels) and in volume space.
+  viking.geometry.v1.Shape mosaic_geometry = 19;
+  // For curve types (open curve, closed curve, curve polygon) the volume shape is the drawn (fitted) outline, sent
+  // without a fit; the annotation's type follows from mosaic_geometry.
+  viking.geometry.v1.Shape volume_geometry = 20;
+  string attributes = 9;
+  repeated int64 links = 10;
+  bool terminal = 11;
+  bool off_edge = 12;
+  google.protobuf.Timestamp created = 16;
+  google.protobuf.Timestamp last_modified = 17;
+  string username = 18;
+}
+
+
+message PermittedStructureLink {
+  int64 source_type_id = 1;
+  int64 target_type_id = 2;
+  bool bidirectional = 3;
+}
