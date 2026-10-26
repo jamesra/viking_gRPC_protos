@@ -27,6 +27,12 @@ service SegmentationService {
   // prompt, RESOURCE_EXHAUSTED when the request is over the server's size limits, UNAVAILABLE when the
   // GPU is lost. This RPC replaced the unary SegmentTiles, which no longer exists.
   rpc SegmentTilesStream (stream SegmentTilesStreamRequest) returns (stream SegmentTilesStreamResponse) {}
+  // Which cells SegmentTilesStream would not ask this client for: the server holds them (GPU or stored
+  // tiles), or reads them from the annotation context's tileset itself. A client calls it before uploading
+  // tiles ahead of a request (prefetch) and skips the held ones. A hint only: nothing is pinned, and a cell
+  // dropped since is asked for during the request as usual. INVALID_ARGUMENT for an UNSPECIFIED space or
+  // more cells than the server's limit (256).
+  rpc GetHeldTiles (HeldTilesRequest) returns (HeldTilesResponse) {}
   // Segment an image based on input coordinates (uses cached image_id or inline image_data)
   rpc SegmentImage (SegmentationRequest) returns (SegmentationResponse) {}
   // Auto-segmentation: each request message is one independent point set for image_id.
@@ -103,6 +109,34 @@ message UploadTileResponse {
   // True when this TileCoord was already encoded and the bytes were unchanged.
   // Clients address tiles by Coord on SegmentTilesStream; no image_id is returned.
   bool already_cached = 1;
+}
+
+// A TileCoord without its row and column: what every cell of a GetHeldTiles batch shares. `space` must be
+// MOSAIC or VOLUME.
+message TileGrid {
+  string volume = 1;
+  int32 section = 2;
+  string channel = 3;
+  string transform = 4;
+  int32 downsample = 5;
+  CoordinateSpace space = 6;
+}
+
+message GridCell {
+  int32 row = 1;
+  int32 col = 2;
+}
+
+message HeldTilesRequest {
+  TileGrid grid = 1;
+  repeated GridCell cells = 2;
+  // As SegmentTilesRequest.annotation_context_id: lets the server count the cells it reads itself as held.
+  int64 annotation_context_id = 3;
+}
+
+message HeldTilesResponse {
+  // One per requested cell, in request order.
+  repeated bool held = 1;
 }
 
 // What a client wants back from a segmentation call. The values are bit flags: a request field
