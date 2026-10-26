@@ -214,7 +214,8 @@ message SegmentationResponse {
   // placement.
   reserved 1, 2, 3, 5, 6, 7;
   reserved "labeled_image", "width", "height", "origin_x", "origin_y", "requested_tiles";
-  // One per island of the object prompt (one when the prompt does not split), in island order.
+  // One per island of the object prompt (one when the prompt does not split), in island order. An island that finds
+  // nothing has no result, so island numbers can have gaps.
   repeated SegmentResult segments = 4;
   // SegmentTilesRequest.request_id echoed back. 0 when the request carried none.
   uint64 request_id = 8;
@@ -235,9 +236,10 @@ message SegmentResult {
   // Samples nobody predicted hold a large negative value.
   bytes logits = 7;
   viking.geometry.v1.IntSize logits_size = 15;
-  // The grid-space pixel (X right, Y up, at the grid's downsample) at the top-left corner of sample (0, 0). Sample
-  // (i, j), column i and row j, covers x in [origin.x + i * scale, origin.x + (i + 1) * scale) and
-  // y in (origin.y - (j + 1) * scale, origin.y - j * scale].
+  // The top-left pixel of sample (0, 0): a grid-space pixel index (X right, Y up, at the grid's downsample; pixel
+  // (x, y) covers [x, x + 1) x [y, y + 1)). Sample (i, j), column i and row j, covers pixel columns
+  // origin.x + i * scale .. origin.x + (i + 1) * scale - 1 and pixel rows origin.y - (j + 1) * scale + 1 ..
+  // origin.y - j * scale. Its centre is (origin.x + (i + 0.5) * scale, origin.y + 1 - (j + 0.5) * scale).
   viking.geometry.v1.IntPoint logits_origin = 14;
   // Pixels per logit sample on both axes (4 for a SAM2 window).
   float logits_scale = 10;
