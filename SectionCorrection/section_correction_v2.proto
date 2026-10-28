@@ -53,7 +53,8 @@ message CorrectionSetId {
 
 // What CorrectStructures applies to the mapped locations.
 enum CorrectionMode {
-  // Sample the published residual field. The default.
+  // Sample the published residual field. The default. From service 1.7.0 CorrectStructures then fits each location on a
+  // damaged section (CorrectionSet.damaged_z) along its process, through locations on undamaged sections only.
   CORRECTION_MODE_NEIGHBOR = 0;
   // Do not move the locations: the StosGroup mapping alone.
   CORRECTION_MODE_NONE = 1;
