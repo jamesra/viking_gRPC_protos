@@ -118,6 +118,10 @@ message CorrectionSet {
   double kernel_radius_nm = 4;
   // Sections with a map, ascending.
   repeated int64 z = 5;
+  // Damaged sections the field was built with, ascending: the volume's NonStosSectionNumbers (sections the
+  // slice-to-volume registration was built without). They correct no other section; each has its own shift fitted
+  // against the corrected sections either side. Empty both when none are listed and when the list could not be read.
+  repeated int64 damaged_z = 6;
 }
 
 message GetSectionCorrectionRequest {
