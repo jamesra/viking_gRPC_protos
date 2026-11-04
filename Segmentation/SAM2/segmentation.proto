@@ -140,6 +140,10 @@ message SegmentTilesRequest {
   bool refresh = 21;
   // Links the result to a job (CreateJob), which keeps it from eviction. 0 or unset: no job.
   optional int64 job_id = 22;
+  // What the object roughly is: an existing outline to correct (a location's own polygon). Its shapes form islands like
+  // foreground shapes, but are encoded as a mask to correct (the model's CORRECTION role, weaker than a seed) and are
+  // never pinned as object. Points are clicks, as in foreground_feature.
+  Feature correction_feature = 23;
 }
 
 // An annotation the request is about, as of its last change.
