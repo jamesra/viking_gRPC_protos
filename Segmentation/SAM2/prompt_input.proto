@@ -6,10 +6,11 @@ package segmentation;
 
 import "Common/geometry.proto";
 
-// The input of the shared prompt library (Viking SegmentationPrompts): everything a client knows about the
-// annotations it wants segmented. The library turns it into a SegmentTilesRequest with one set of rules, so the Viking
-// client and the annotation gallery send byte-identical requests for the same location (and share the server's result
-// cache), and those requests match how the served model was trained. Not sent to the server.
+// The input of a prompt provider inside the segmentation server (the first is Viking.SegmentationPrompts, under
+// Servers/SegmentationServer/prompt_providers): the annotations a SegmentLocation call segments, as the server read
+// them from the annotation service. The provider turns it into a SegmentTilesRequest with one set of rules, so every
+// client gets the same request for the same location (and shares the server's result cache), and those requests match
+// how the served model was trained. Never sent on the wire.
 //
 // Every coordinate is in the section's MOSAIC space at full resolution (downsample 1), X right, Y up, as the location
 // stores it.
